@@ -18,6 +18,8 @@ import mindspore as ms
 import mindspore.ops as ops
 import mindspore.nn as nn
 from mindspore import Tensor
+
+
 from .bbox_assign_sample import BboxAssignSample
 
 
@@ -198,11 +200,14 @@ class RPN(nn.Cell):
         return rpn_layer
 
     def construct(self, inputs, img_metas, anchor_list, gt_bboxes, gt_labels, gt_valids):
+        #TODO 可以借助img_meta计算坐标位置解码 以及scale一类，参考faster_rcnn lin378
         loss_print = ()
         rpn_cls_score = ()
         rpn_bbox_pred = ()
         rpn_cls_score_total = ()
         rpn_bbox_pred_total = ()
+        # Uint8 和Uint64 在cpu内核下，都不支持gt_labels_i 切片， 仅支持float32，
+        gt_labels = self.cast(gt_labels, ms.float32)
 
         for i in range(self.num_layers):
             x1, x2 = self.rpn_convs_list[i](inputs[i])
@@ -226,13 +231,15 @@ class RPN(nn.Cell):
         bbox_weights = ()
         labels = ()
         label_weights = ()
-
+        #存放用以后续解码预测框坐标
+        decode_anchor_lists = ()
         output = ()
         if self.training:
+            #batch_size = 默认值为2,对应于default_config.yaml的配置项
             for i in range(self.batch_size):
                 multi_level_flags = ()
                 anchor_list_tuple = ()
-
+                #num_layer是fpn层数-1
                 for j in range(self.num_layers):
                     res = self.cast(self.CheckValid(anchor_list[j], self.squeeze(img_metas[i:i + 1:1, ::])),
                                     ms.int32)
@@ -242,10 +249,16 @@ class RPN(nn.Cell):
                 valid_flag_list = self.concat(multi_level_flags)
                 anchor_using_list = self.concat(anchor_list_tuple)
 
+
                 gt_bboxes_i = self.squeeze(gt_bboxes[i:i + 1:1, ::])
                 gt_labels_i = self.squeeze(gt_labels[i:i + 1:1, ::])
+                #切片后再转换回来，还原到uint8
+                gt_labels_i = self.cast(gt_labels_i, ms.uint8)
                 gt_valids_i = self.squeeze(gt_valids[i:i + 1:1, ::])
 
+
+                #TODO 此处应该过滤了valid_flag_list为0的大部分无效anchor，但是得到的首位label出现68这种非正常数据，待排查
+                # anchor—_using_list tensor:(245520,4)
                 bbox_target, bbox_weight, label, label_weight = self.get_targets(gt_bboxes_i,
                                                                                  gt_labels_i,
                                                                                  self.cast(valid_flag_list,
@@ -265,61 +278,65 @@ class RPN(nn.Cell):
                     bbox_weights += (bbox_weight[begin:end:stride],)
                     labels += (label[begin:end:stride],)
                     label_weights += (label_weight[begin:end:stride],)
+                    decode_anchor_lists +=(anchor_using_list[begin:end:stride, ::],)
 
-            # 计算本次损失函数成分中，所有预测框的平均面积area_mean
-            predicted_boxex = Tensor.to_tensor(rpn_bbox_pred, self.ms_type)
-            input_width = predicted_boxex[:, 2] - predicted_boxex[:, 0]
-            input_height = predicted_boxex[:, 3] - predicted_boxex[:, 1]
-            predicted_box_aeras = input_width * input_height
-            mean_area = Tensor.mean(predicted_box_aeras)
 
             for i in range(self.num_layers):
                 bbox_target_using = ()
                 bbox_weight_using = ()
                 label_using = ()
                 label_weight_using = ()
-
+                temp_anchor_list = ()
 
                 for j in range(self.batch_size):
                     bbox_target_using += (bbox_targets[i + (self.num_layers * j)],)
                     bbox_weight_using += (bbox_weights[i + (self.num_layers * j)],)
                     label_using += (labels[i + (self.num_layers * j)],)
                     label_weight_using += (label_weights[i + (self.num_layers * j)],)
+                    temp_anchor_list += (decode_anchor_lists[i + (self.num_layers * j)],)
 
                 bbox_target_with_batchsize = self.concat(bbox_target_using)
                 bbox_weight_with_batchsize = self.concat(bbox_weight_using)
                 label_with_batchsize = self.concat(label_using)
                 label_weight_with_batchsize = self.concat(label_weight_using)
-
+                temp_anchor_list_with_batchsize = self.concat(temp_anchor_list)
                 # stop
                 bbox_target_ = ops.stop_gradient(bbox_target_with_batchsize)
                 bbox_weight_ = ops.stop_gradient(bbox_weight_with_batchsize)
                 label_ = ops.stop_gradient(label_with_batchsize)
                 label_weight_ = ops.stop_gradient(label_weight_with_batchsize)
+                decode_anchor_list_ = ops.stop_gradient(temp_anchor_list_with_batchsize)
 
                 cls_score_i = self.cast(rpn_cls_score[i], self.ms_type)
                 reg_score_i = self.cast(rpn_bbox_pred[i], self.ms_type)
 
                 loss_cls = self.loss_cls(cls_score_i, label_)
-
-
-                # predicted_box_aeras[i]是对应预测框的坐标，可以用来计算plb系数
-                pred_area = predicted_box_aeras[i]
-                PLB_weight_i = (2 * mean_area) / (pred_area + mean_area)
-                # 对RPN阶段的分类损失，进一步 * plb系数
-                loss_cls = loss_cls * PLB_weight_i
-
                 loss_cls_item = loss_cls * label_weight_
+
+                #获取预测框坐标，计算PLB系数
+                bounding_box_decode = ops.BoundingBoxDecode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0),max_shape=(768, 1280))
+                predicted_boxes = bounding_box_decode(decode_anchor_list_,reg_score_i)
+
+                # 计算本次损失函数成分中，所有预测框的平均面积area_mean
+                box_width = predicted_boxes[:, 2] - predicted_boxes[:, 0]
+                box_height = predicted_boxes[:, 3] - predicted_boxes[:, 1]
+                predicted_boxes_aeras = box_width * box_height
+                mean_area = predicted_boxes_aeras.mean()
+                PLB_weight_i = (mean_area*2) / (mean_area+predicted_boxes_aeras)
+                # #对RPN阶段的回归损失，进一步 * plb系数|
+                loss_cls_item = loss_cls_item * PLB_weight_i
                 loss_cls_item = self.sum_loss(loss_cls_item, (0,)) / self.num_expected_total
 
                 loss_reg = self.loss_bbox(reg_score_i, bbox_target_)
                 bbox_weight_ = self.tile(self.reshape(bbox_weight_, (self.feature_anchor_shape[i], 1)), (1, 4))
 
-                # 对RPN阶段的边框回归损失，进一步 * plb系数
-                loss_reg = loss_reg * PLB_weight_i
 
+                #loss_reg 是个n*4的tensor
                 loss_reg = loss_reg * bbox_weight_
                 loss_reg_item = self.sum_loss(loss_reg, (1,))
+                # 对RPN阶段的边框回归损失，进一步 * plb系数| bbox_weight_ 是（n，4）的tensor，而loss_reg_item是(n，)
+                loss_reg_item = loss_reg_item * PLB_weight_i
+
                 loss_reg_item = self.sum_loss(loss_reg_item, (0,)) / self.num_expected_total
 
                 loss_total = self.rpn_loss_cls_weight * loss_cls_item + self.rpn_loss_reg_weight * loss_reg_item
