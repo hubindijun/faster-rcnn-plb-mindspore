@@ -101,7 +101,7 @@ class RPN(nn.Cell):
                  cls_out_channels):
         super(RPN, self).__init__()
         cfg_rpn = config
-        self.config = config
+        #self.config = config
         self.dtype = np.float32
         self.ms_type = ms.float32
         self.device_type = "Ascend" if ms.get_context("device_target") == "Ascend" else "Others"
@@ -202,7 +202,6 @@ class RPN(nn.Cell):
         return rpn_layer
 
     def construct(self, inputs, img_metas, anchor_list, gt_bboxes, gt_labels, gt_valids):
-        #TODO 可以借助img_meta计算坐标位置解码 以及scale一类，参考faster_rcnn lin378
         loss_print = ()
         rpn_cls_score = ()
         rpn_bbox_pred = ()
@@ -258,13 +257,12 @@ class RPN(nn.Cell):
                 gt_labels_i = self.cast(gt_labels_i, ms.uint8)
                 gt_valids_i = self.squeeze(gt_valids[i:i + 1:1, ::])
 
-                # anchor—_using_list tensor:(245520,4)
+                # anchor—_using_list tensor:(n,4)
                 bbox_target, bbox_weight, label, label_weight = self.get_targets(gt_bboxes_i,
                                                                                  gt_labels_i,
                                                                                  self.cast(valid_flag_list,
                                                                                            ms.bool_),
                                                                                  anchor_using_list, gt_valids_i)
-               # anchor_using_list 和 bbox_target 对应不上,应该通过for循环中，取出最早的list中的两个，再contact出来2倍的
                # bbox_target是追加了部分真值标签的
                 bbox_target = self.cast(bbox_target, self.ms_type)
                 bbox_weight = self.cast(bbox_weight, self.ms_type)
@@ -281,7 +279,8 @@ class RPN(nn.Cell):
                     label_weights += (label_weight[begin:end:stride],)
                     decode_anchor_lists +=(anchor_using_list[begin:end:stride, ::],)
 
-            #防止出现anchor都是0的结果导致nan错误，待研究
+            #对迭代项中每个特征层的输出，计算损失函数值，并进行PLB系数加权调整，目前代码可以在mindspore动态图模式正常执行，但是在静态图模式中，保存每次epoch后的模型时出现错误
+            # message：anf_runtime_algorithm.cc:507 GetMutableOutputAddr] Output_idx0 of node
             for i in range(self.num_layers):
                 bbox_target_using = ()
                 bbox_weight_using = ()
@@ -316,7 +315,7 @@ class RPN(nn.Cell):
 
                 #获取预测框坐标，计算PLB系数
                 #理想算法实现1： 使用基于框架底层c++实现的api，使用解码ops方法
-                # 缺陷：由于mindspore中的BoundingBoxDecode暂不支持反向传播属性，导致静态图模式下训练时出现错误，而调试模式可执行。
+                # 缺陷：由于mindspore中的BoundingBoxDecode暂不支持反向传播属性，导致静态图模式下训练时出现错误，而动态图模式可执行。
                 # bounding_box_decode = ops.BoundingBoxDecode(max_shape=(self.config.img_height, self.config.img_width), means=tuple(self.config.rpn_target_means),
                 #                           stds=tuple(self.config.rpn_target_stds))
                 # predicted_boxes_decode = bounding_box_decode(decode_anchor_list_,reg_score_i)
@@ -339,7 +338,7 @@ class RPN(nn.Cell):
                 # box_width = box_width_anchor * w_scale
                 # box_height = box_height_anchor * h_scale
 
-                #手写计算方法3：直接用anchor的大小来作为预测框大小，未来可以优化为前两种方法
+                #手写计算方法3：直接用anchor的大小来作为预测框大小
                 box_width_anchor = decode_anchor_list_[:, 2]
                 box_height_anchor = decode_anchor_list_[:, 3]
                 # 计算检测框的宽度和高度

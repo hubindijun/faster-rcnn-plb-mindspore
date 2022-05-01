@@ -35,7 +35,7 @@ from src.lr_schedule import dynamic_lr, multistep_lr
 from src.model_utils.config import config
 from src.model_utils.moxing_adapter import moxing_wrapper
 from src.model_utils.device_adapter import get_device_id
-
+from mindspore import context
 
 def train_fasterrcnn_():
     """ train_fasterrcnn_ """
@@ -47,6 +47,10 @@ def train_fasterrcnn_():
     mindrecord_dir = config.mindrecord_dir
     mindrecord_file = os.path.join(mindrecord_dir, prefix + "0")
     print("CHECKING MINDRECORD FILES ...")
+
+    #设置动态图模式，才能用来调试代码
+    # context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
+    context.set_context(mode=context.PYNATIVE_MODE, device_target="GPU")
 
     if rank == 0 and not os.path.exists(mindrecord_file):
         if not os.path.isdir(mindrecord_dir):
@@ -224,10 +228,10 @@ def train_fasterrcnn():
     model = Model(net)
     model.train(config.epoch_size, dataset, callbacks=cb)
 
-
+import mindspore.ops as ops
 if __name__ == '__main__':
     set_seed(1)
-    ms.set_context(mode=ms.GRAPH_MODE, device_target=config.device_target, device_id=get_device_id())
+    ms.set_context(mode=ms.PYNATIVE_MODE, device_target=config.device_target, device_id=get_device_id())
 
     local_path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
     summary_dir = local_path + "/train/summary/"
