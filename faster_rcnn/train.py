@@ -50,7 +50,7 @@ def train_fasterrcnn_():
 
     #设置动态图模式，才能用来调试代码
     # context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
-    context.set_context(mode=context.PYNATIVE_MODE, device_target="GPU")
+    # context.set_context(mode=context.PYNATIVE_MODE, device_target="CPU")
 
     if rank == 0 and not os.path.exists(mindrecord_file):
         if not os.path.isdir(mindrecord_dir):
@@ -172,10 +172,11 @@ def train_fasterrcnn():
     else:
         lr = Tensor(multistep_lr(config, dataset_size), ms.float32)
 
-    if config.opt_type.lower() not in ("sgd", "adam"):
+    if config.opt_type.lower() not in ("sgd", "adam","asgd"):
         raise ValueError("Optimize type should be 'SGD' or 'Adam'")
     if config.opt_type.lower() == "sgd":
-        opt = SGD(params=net.trainable_params(), learning_rate=lr, momentum=config.momentum,
+        #需要自定义基于sgd的优化器，实现梯度裁剪，防止梯度爆炸问题
+        opt = SGD(params=net.trainable_params(), learning_rate=lr ,momentum=config.momentum,
                   weight_decay=config.weight_decay, loss_scale=config.loss_scale)
     else:
         opt = Adam(params=net.trainable_params(), learning_rate=lr,

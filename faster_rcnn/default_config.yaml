@@ -103,7 +103,7 @@ rpn_head_use_sigmoid: True
 rpn_head_weight: 1.0
 
 # LR
-base_lr: 0.04
+base_lr: 0.005 #设置不能超过0.005，否则训练过程中容易出现梯度爆炸的情况
 warmup_step: 500
 warmup_ratio: 0.0625
 sgd_step: [8, 11]
@@ -112,7 +112,7 @@ lr_type: "dynamic"
 
 # train
 batch_size: 2
-loss_scale: 256
+loss_scale: 256a
 momentum: 0.91
 weight_decay: 0.00001
 epoch_size: 20
@@ -126,17 +126,17 @@ opt_type: "sgd"
 finetune: False
 
 # Number of threads used to process the dataset in parallel
-num_parallel_workers: 8
+num_parallel_workers: 2
 # Parallelize Python operations with multiple worker processes
 python_multiprocessing: True
 
-
+#COCO格式的BCCD数据集
 mindrecord_dir: "/Users/hubin/PycharmProjects/data/bccd_coco_mindspore/MindRecord_COCO_TRAIN"
 coco_root: "/Users/hubin/PycharmProjects/data/bccd_coco_mindspore"
 train_data_type: "train"
 val_data_type: "valid"
 instance_set: "annotations/instance_{}.json"
-coco_classes: [ 'cells', 'Platelets', 'RBC', 'WBC']
+coco_classes: [ 'background', 'Platelets', 'RBC', 'WBC']
 
 
 num_classes: 4
@@ -147,7 +147,7 @@ prefix: ""
 run_distribute: False
 dataset: "coco"
 pre_trained: "/Users/hubin/mindsp_PLB/backbone.ckpt" #仅装载需要backbone的预训练文件，模型装载，不微调
-device_id: 0
+device_id: 1
 device_num: 1
 rank_id: 0
 image_dir: ''
@@ -155,13 +155,12 @@ anno_path: '/Users/hubin/PycharmProjects/data/bccd_coco_mindspore/annotations/in
 backbone: 'resnet_v1.5_50'
 
 # eval.py FasterRcnn evaluation
-checkpoint_path: '/Users/hubin/mindsp_PLB/faster_rcnn_1-20_382.ckpt'
+checkpoint_path: '/Users/hubin/mindsp_PLB/faster_rcnn_5-5_382.ckpt'
 
 # export.py fasterrcnn_export
 file_name: "faster_rcnn"
 file_format: "MINDIR"
-ckpt_file: '/Users/hubin/mindsp_PLB/faster_rcnn_1-20_382.ckpt'
-#"/Users/hubin/mindsp_PLB/resnet-90_5004_76.7.ckpt" #转换backbone时用
+ckpt_file: '/Users/hubin/mindsp_PLB/faster_rcnn_1！-20_382.ckpt'
 
 # postprocess ("./src/config_50.yaml")
 result_path: ''

@@ -325,8 +325,6 @@ class RPN(nn.Cell):
                 #TODO 待确认 解码后的坐标形式是x1，y1，x2，y2；还是xywh的格式,否则计算方式有问题，按说不存在那么多为0的检测框
                 box_width = predicted_boxes[:, 2] - predicted_boxes[:, 0]
                 box_height = predicted_boxes[:, 3] - predicted_boxes[:, 1]
-                # box_width = predicted_boxes[:, 2]
-                # box_height = predicted_boxes[:, 3]
 
                 #异常nan处理：解码后，与reg_score_i关联起来，随着训练的进行，到后期可能出现极端异常的数据，造成nan错误
                 #坐标框的x1，y1,x2,y2中，x1<=x2,y1<=y2的情况出现，因为是浮点数，可能导致两个负数相乘，进而plb计算越界的情况
@@ -334,23 +332,8 @@ class RPN(nn.Cell):
                 add_wh = oneli(box_width)
                 box_width = box_width + add_wh
                 box_height = box_height + add_wh
-
-                #手动解码方法2:已知anchor中的wh和pred_deltas偏移dw,dh,求面积结果
-                #缺陷：由于Mindspore-GPU环境的图模式运算下，不支持np.asnumpy()方法，同时没有合适的指数运算exp方法，
-                #备注：CPU环境中正常
-                #手写计算方法2.通过anchor和pred_offset计算出面积
-                # box_width_anchor = decode_anchor_list_[:, 2]
-                # box_height_anchor = decode_anchor_list_[:, 3]
-                # #由于mindspore中的Tensor没有指数函数操作，因此借助与numpy转换运算
-                # w_scale = np.exp(reg_score_i[:, 2].asnumpy())
-                # w_scale = Tensor(w_scale,dtype=self.ms_type)
-                # h_scale = np.exp(reg_score_i[:, 3].asnumpy())
-                # h_scale = Tensor(h_scale,dtype=self.ms_type)
-                # #计算检测框的宽度和高度
-                # box_width = box_width_anchor * w_scale
-                # box_height = box_height_anchor * h_scale
-
-                #实验方法3：直接用anchor的大小来作为预测框大小，较为固定，无法在训练过程中更好的拟合预测效果
+                
+                #方案2：直接用anchor的大小来作为预测框大小，较为固定，无法在训练过程中更好的拟合预测效果
                 # box_width_anchor = decode_anchor_list_[:, 2]
                 # box_height_anchor = decode_anchor_list_[:, 3]
                 # # 计算检测框的宽度和高度
@@ -368,20 +351,11 @@ class RPN(nn.Cell):
                 #不能直接*label_weight，因为可能导致所有的areas都变成0，造成后续PLB计算时，负无穷溢出
                 # 统计出对应label_weight_中为1的索引列的值，求平均值，label_weight_=0的部分不应干扰平均值的计算
 
-                # print(mean_area)
-                # print(predicted_boxes_aeras.min())
                 PLB_weight_i = (mean_area * 2) / (mean_area + predicted_boxes_aeras)
-                # print(PLB_weight_i.min())
-                # print(PLB_weight_i.max())
 
-                # 对比未经过PLB的损失结果#
-                #TODO 此处是否不需要ops.stop_gradient，loss_cls_item_before_plb不会用于反向传播本身
-                # loss_cls_item_before_plb =  ops.stop_gradient(loss_cls_item)
-                # loss_cls_item_before_plb =  self.sum_loss(loss_cls_item_before_plb, (0,)) / self.num_expected_total
-                # print(loss_cls_item_before_plb) #存在异常的情况，分类损失极大
-
-                #对于mindspore-gpu下，tensor和nparray的转换，以及mindspore.numpy的区别
-                loss_cls_item = loss_cls_item * PLB_weight_i
+                PLB_weight_i_ngrad = ops.stop_gradient(PLB_weight_i)
+                loss_cls_item = loss_cls_item * PLB_weight_i_ngrad
+                
                 loss_cls_item = self.sum_loss(loss_cls_item, (0,)) / self.num_expected_total
 
                 loss_reg = self.loss_bbox(reg_score_i, bbox_target_)
@@ -390,7 +364,7 @@ class RPN(nn.Cell):
                 loss_reg = loss_reg * bbox_weight_
                 loss_reg_item = self.sum_loss(loss_reg, (1,))
                 #RPN边框回归损失函数加入PLB操作
-                loss_reg_item = loss_reg_item * PLB_weight_i
+                loss_reg_item = loss_reg_item * PLB_weight_i_ngrad
                 loss_reg_item = self.sum_loss(loss_reg_item, (0,)) / self.num_expected_total
 
                 loss_total = self.rpn_loss_cls_weight * loss_cls_item + self.rpn_loss_reg_weight * loss_reg_item
@@ -399,10 +373,6 @@ class RPN(nn.Cell):
                 loss_print += (loss_total, loss_cls_item, loss_reg_item)
                 clsloss += loss_cls_item
                 regloss += loss_reg_item
-
-                # print(loss_cls_item)
-                # print(clsloss)
-                # print('-----')
                 output = (loss, rpn_cls_score_total, rpn_bbox_pred_total, clsloss, regloss, loss_print)
         else:
             output = (self.placeh1, rpn_cls_score_total, rpn_bbox_pred_total, self.placeh1, self.placeh1, self.placeh1)

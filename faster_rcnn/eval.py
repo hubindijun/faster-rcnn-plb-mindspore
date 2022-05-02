@@ -22,6 +22,7 @@ import numpy as np
 from pycocotools.coco import COCO
 import mindspore as ms
 from mindspore.common import set_seed, Parameter
+from mindspore import context
 
 from src.dataset import data_to_mindrecord_byte_image, create_fasterrcnn_dataset, parse_json_annos_from_txt
 from src.util import coco_eval, bbox2result_1image, results2json
@@ -83,7 +84,7 @@ def fasterrcnn_eval(dataset_path, ckpt_path, anno_path):
         gt_bboxes = data['box']
         gt_labels = data['label']
         gt_num = data['valid_num']
-
+        #label中只有1，2，3，其余不足数目时用-1补足
         start = time.time()
         # run net
         output = net(img_data, img_metas, gt_bboxes, gt_labels, gt_num)
@@ -102,6 +103,11 @@ def fasterrcnn_eval(dataset_path, ckpt_path, anno_path):
 
             all_bboxes_tmp_mask = all_bbox_squee[all_mask_squee, :]
             all_labels_tmp_mask = all_label_squee[all_mask_squee]
+            #原本训练的模型有问题，输出的label只有0，1，2，而不是期望中的1，2，3，，可能和BCCD数据集有个0类的cells有关系
+            #print(all_labels_tmp_mask)
+            # 以下3行代码，仅对于BCCD数据集兼容，其余数据集按需添加
+            add_modify = np.ones_like(all_labels_tmp_mask)
+            all_labels_tmp_mask = all_labels_tmp_mask + add_modify
 
             if all_bboxes_tmp_mask.shape[0] > max_num:
                 inds = np.argsort(-all_bboxes_tmp_mask[:, -1])
@@ -114,9 +120,9 @@ def fasterrcnn_eval(dataset_path, ckpt_path, anno_path):
 
     eval_types = ["bbox"]
     result_files = results2json(dataset_coco, outputs, "./results.pkl")
-
     coco_eval(config, result_files, eval_types, dataset_coco,
               single_result=False, plot_detect_result=True)
+
     print("\nEvaluation done!")
 
 
@@ -191,6 +197,7 @@ def eval_fasterrcnn():
 
 if __name__ == '__main__':
     set_seed(1)
-    ms.set_context(mode=ms.GRAPH_MODE, device_target=config.device_target, device_id=get_device_id())
+    # ms.set_context(mode=ms.PYNATIVE_MODE, device_target=config.device_target, device_id=get_device_id())
+    context.set_context(mode=context.PYNATIVE_MODE, device_target="CPU")
 
     eval_fasterrcnn()
