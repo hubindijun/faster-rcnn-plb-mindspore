@@ -5,5 +5,4 @@ Base on MindSpore platform(https://gitee.com/mindspore/models.git)，implement a
 
 software environment specification : https://gitee.com/hubindijun/faster_rcnn_plb/blob/master/faster_rcnn/README_CN.md
 
-Tips：Support the code running on PY_NATIVE Mode with mindspore platform version1.7.
-      Our code is not compatible with GRAPH Mode ，that will depend on mindspore with future version。
+Tips：Support the code running on PY_NATIVE Mode and GRAPH Mode.
