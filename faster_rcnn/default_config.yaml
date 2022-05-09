@@ -136,10 +136,10 @@ coco_root: "/Users/hubin/PycharmProjects/data/bccd_coco_mindspore"
 train_data_type: "train"
 val_data_type: "valid"
 instance_set: "annotations/instance_{}.json"
-coco_classes: [ 'background', 'Platelets', 'RBC', 'WBC']
+coco_classes: [ 'background', 'cells',Platelets', 'RBC', 'WBC']
 
 
-num_classes: 4
+num_classes: 5
 
 prefix: ""
 
